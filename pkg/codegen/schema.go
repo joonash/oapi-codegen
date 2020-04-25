@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -57,6 +58,7 @@ type Property struct {
 	JsonFieldName string
 	Schema        Schema
 	Required      bool
+	Validation    []string
 }
 
 func (p Property) GoFieldName() string {
@@ -158,6 +160,15 @@ func GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schema, error) {
 			// We've got an object with some properties.
 			for _, pName := range SortedSchemaKeys(schema.Properties) {
 				p := schema.Properties[pName]
+				var pValidations []string
+
+				if val, ok := p.Value.Extensions["x-oapi-validate"]; ok {
+					msg := val.(json.RawMessage)
+					if err := json.Unmarshal(msg, &pValidations); err != nil {
+						return Schema{}, errors.Wrap(err, fmt.Sprintf("error generating validations for property '%s'.", pName))
+					}
+				}
+
 				propertyPath := append(path, pName)
 				pSchema, err := GenerateGoSchema(p, propertyPath)
 				if err != nil {
@@ -191,6 +202,7 @@ func GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schema, error) {
 					Schema:        pSchema,
 					Required:      required,
 					Description:   description,
+					Validation:    pValidations,
 				}
 				outSchema.Properties = append(outSchema.Properties, prop)
 			}
@@ -285,6 +297,22 @@ type FieldDescriptor struct {
 	IsRef    bool   // Is this schema a reference to predefined object?
 }
 
+func GenerateValidation(validation []string) string {
+	if len(validation) == 0 {
+		return "`"
+	}
+
+	validationString := ""
+
+	for _, validationRule := range validation {
+		escapedRule := strings.ReplaceAll(validationRule, ",", "0x2C")
+		escapedRule = strings.ReplaceAll(escapedRule, "|", "0x7C")
+		validationString += escapedRule + ","
+	}
+
+	return fmt.Sprintf(" validate:\"%s\"`", validationString[0:len(validationString)-1])
+}
+
 // Given a list of schema descriptors, produce corresponding field names with
 // JSON annotations
 func GenFieldsFromProperties(props []Property) []string {
@@ -299,10 +327,11 @@ func GenFieldsFromProperties(props []Property) []string {
 		}
 		field += fmt.Sprintf("    %s %s", p.GoFieldName(), p.GoTypeDef())
 		if p.Required {
-			field += fmt.Sprintf(" `json:\"%s\"`", p.JsonFieldName)
+			field += fmt.Sprintf(" `json:\"%s\"", p.JsonFieldName)
 		} else {
-			field += fmt.Sprintf(" `json:\"%s,omitempty\"`", p.JsonFieldName)
+			field += fmt.Sprintf(" `json:\"%s,omitempty\"", p.JsonFieldName)
 		}
+		field += GenerateValidation(p.Validation)
 		fields = append(fields, field)
 	}
 	return fields
