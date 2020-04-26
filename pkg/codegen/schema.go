@@ -162,7 +162,7 @@ func GenerateGoSchema(sref *openapi3.SchemaRef, path []string) (Schema, error) {
 				p := schema.Properties[pName]
 				var pValidations []string
 
-				if val, ok := p.Value.Extensions["x-oapi-validate"]; ok {
+				if val, ok := p.Value.Extensions["x-oapi-codegen-validate"]; ok {
 					msg := val.(json.RawMessage)
 					if err := json.Unmarshal(msg, &pValidations); err != nil {
 						return Schema{}, errors.Wrap(err, fmt.Sprintf("error generating validations for property '%s'.", pName))
